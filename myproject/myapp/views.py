@@ -11,14 +11,10 @@ from django.http import HttpResponse
 # from django.views.decorators.csrf import csrf_exempt
 
 # --face detect_face import
-import dlib
-import cv2
+import cv2, os, time, face_recognition, dlib
 import numpy as np
 # from django.core.files.base import ContentFile
 from myapp.models import Face_user
-import os
-import time
-import face_recognition
 # import io
 # from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -83,7 +79,7 @@ def detect_face_register(request):
                     h = int(h*1.4)
 
                     # Crop the face region from the frame
-                    face_img = gray[y:y+h, x:x+w]
+                    face_img = frame[y:y+h, x:x+w]
                     
 
                     # Detect the landmarks in the face region
