@@ -12,4 +12,5 @@ from django.db import models
 
 class Face_user(models.Model):
     username = models.CharField(max_length=100)
-    image = models.ImageField()
+    image = models.CharField(max_length=100)
+    feature = models.CharField(max_length=100)

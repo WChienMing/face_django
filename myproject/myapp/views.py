@@ -11,7 +11,7 @@ from django.http import HttpResponse
 # from django.views.decorators.csrf import csrf_exempt
 
 # --face detect_face import
-import cv2, os, time, face_recognition, dlib
+import cv2, os, time, face_recognition, dlib, sys, random
 import numpy as np
 # from django.core.files.base import ContentFile
 from myapp.models import Face_user
@@ -45,83 +45,94 @@ def doregister(request):
 
 # need install opencv and Pillow and dlib and cmake
 def detect_face_register(request):
+    # 加载人脸检测器和特征提取器
+    face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+    lbph_face = cv2.face.LBPHFaceRecognizer_create()
+
+    # 设置保存人脸图像和特征的文件夹
+    face_folder = 'face_image'
+    feature_folder = 'face_features'
+
+    # 检查文件夹是否存在，不存在则创建
+    if not os.path.exists(face_folder):
+        os.makedirs(face_folder)
+    if not os.path.exists(feature_folder):
+        os.makedirs(feature_folder)
+
     if request.method == 'POST':
         input_data = request.POST.get('username')
         if input_data != "":
-            # Initialize dlib's face detector and landmark predictor
-            detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-
-            # Create a directory to save the images
-            save_dir = 'face_image'
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-
-            # Initialize the webcam
+            # 打开摄像头
             cap = cv2.VideoCapture(0)
 
+            # 检查是否存在人脸特征文件，如果存在就读取
+            feature_files = os.listdir(feature_folder)
+            if feature_files:
+                recognizer = cv2.face.LBPHFaceRecognizer_create()
+                for feature_file in feature_files:
+                    feature_path = os.path.join(feature_folder, feature_file)
+                    recognizer.read(feature_path)
+            stop = False
             while True:
-                # Capture frame from the camera
+                # 读取摄像头图像
                 ret, frame = cap.read()
+                if not ret:
+                    continue
 
-                # Convert the frame to grayscale
+                # 转换图像为灰度图
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                # Detect faces in the grayscale frame
-                faces = detector.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=3, minSize=(30, 30))
+                # 检测人脸
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(100, 100))
 
-                # Loop over the faces detected
-                stop = False
+                # 显示检测到的人脸并提取特征
                 for (x, y, w, h) in faces:
+                    # 绘制矩形框
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
-                    x -= int(w*0.15)
-                    y -= int(h*0.15)
-                    w = int(w*1.4)
-                    h = int(h*1.4)
+                    # 提取人脸区域
+                    face_roi = gray[y:y+h, x:x+w]
 
-                    # Crop the face region from the frame
-                    face_img = frame[y:y+h, x:x+w]
-                    
+                    # 提取人脸特征
+                    if feature_files:
+                        id_, confidence = recognizer.predict(face_roi)
+                        if confidence < 100:
+                            label = 'known'
+                        else:
+                            label = 'unknown'
+                    else:
+                        label = 'unknown'
 
-                    # Detect the landmarks in the face region
-                    face_landmarks = face_recognition.face_landmarks(face_img)
+                    # 将人脸图像保存到文件夹中
+                    if label == 'unknown':
+                        id_ = random.randint(1000, 9999)
+                        filename = f'{face_folder}/face_{id_}.jpg'
+                        cv2.imwrite(filename, face_roi)
 
-                    # Draw the landmarks on the face image
-                    for landmarks in face_landmarks:
-                        for feature_name, points in landmarks.items():
-                            for point in points:
-                                cv2.circle(face_img, point, 2, (0, 0, 255), -1)
+                        # 提取人脸特征并保存到文件夹中
+                        feature_filename = f'{feature_folder}/face_{id_}.yml'
+                        lbph_face.train([face_roi], np.array([id_]))
+                        lbph_face.write(feature_filename)
 
-                    # Save the image with landmarks
-                    save_path = os.path.join(save_dir, f'face_{len(os.listdir(save_dir))+1}.jpg')
-                    cv2.imwrite(save_path, face_img)
-
-                    # Save the image and input_data to the database
-                    face = Face_user(username=input_data, image=save_path)
-                    face.save()
+                        face = Face_user(username=input_data, image=filename, feature=feature_filename)
+                        face.save()
                     stop = True
 
-                no_face = False
+                # 显示图像
+                cv2.imshow('Face detection', frame)
 
-                # Display the frame with detected faces
-                for (x, y, w, h) in faces:
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                cv2.imshow('Face Detection', frame)
-
-                # Check if the user pressed the 'q' key to exit
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                # 按下 q 键退出循环
+                if cv2.waitKey(1) == ord('q'):
                     break
-                if stop:
-                    break
-                if not no_face:
+                elif stop:
                     break
 
-            # Release the camera and destroy all windows
+            # 关闭摄像头和窗口
             cap.release()
             cv2.destroyAllWindows()
-            if stop:
+
+            if label == 'unknown':
                 return render(request, 'page/register.html', {'my_data': 'Register successfully!'})
             else:
-                return render(request, 'page/register.html', {'my_data': 'Fail!'})
-
-    return render(request, 'page/register.html')
+                return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
 
