@@ -45,15 +45,12 @@ def doregister(request):
 
 # need install opencv and Pillow and dlib and cmake
 def detect_face_register(request):
-    # 加载人脸检测器和特征提取器
     face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
     lbph_face = cv2.face.LBPHFaceRecognizer_create()
 
-    # 设置保存人脸图像和特征的文件夹
     face_folder = 'face_image'
     feature_folder = 'face_features'
 
-    # 检查文件夹是否存在，不存在则创建
     if not os.path.exists(face_folder):
         os.makedirs(face_folder)
     if not os.path.exists(feature_folder):
@@ -62,77 +59,68 @@ def detect_face_register(request):
     if request.method == 'POST':
         input_data = request.POST.get('username')
         if input_data != "":
-            # 打开摄像头
             cap = cv2.VideoCapture(0)
 
-            # 检查是否存在人脸特征文件，如果存在就读取
             feature_files = os.listdir(feature_folder)
             if feature_files:
                 recognizer = cv2.face.LBPHFaceRecognizer_create()
                 for feature_file in feature_files:
                     feature_path = os.path.join(feature_folder, feature_file)
                     recognizer.read(feature_path)
-            stop = False
-            while True:
-                # 读取摄像头图像
+
+            face_count = 0
+            face_images = []
+            face_ids = []
+
+            while face_count < 100:
                 ret, frame = cap.read()
                 if not ret:
                     continue
 
-                # 转换图像为灰度图
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-                # 检测人脸
                 faces = face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(100, 100))
 
-                # 显示检测到的人脸并提取特征
                 for (x, y, w, h) in faces:
-                    # 绘制矩形框
                     cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
-                    # 提取人脸区域
                     face_roi = gray[y:y+h, x:x+w]
 
-                    # 提取人脸特征
                     if feature_files:
                         id_, confidence = recognizer.predict(face_roi)
                         if confidence < 100:
-                            label = 'known'
-                        else:
-                            label = 'unknown'
-                    else:
-                        label = 'unknown'
+                            print(confidence)
+                            # return render(request, 'page/register.html', {'my_data': 'Known face detected, skipping'})
+                            continue
+                    face_images.append(face_roi)
+                    face_count += 1
+                    
 
-                    # 将人脸图像保存到文件夹中
-                    if label == 'unknown':
-                        id_ = random.randint(1000, 9999)
-                        filename = f'{face_folder}/face_{id_}.jpg'
-                        cv2.imwrite(filename, face_roi)
-
-                        # 提取人脸特征并保存到文件夹中
-                        feature_filename = f'{feature_folder}/face_{id_}.yml'
-                        lbph_face.train([face_roi], np.array([id_]))
-                        lbph_face.write(feature_filename)
-
-                        face = Face_user(username=input_data, image=filename, feature=feature_filename)
-                        face.save()
-                    stop = True
-
-                # 显示图像
                 cv2.imshow('Face detection', frame)
 
-                # 按下 q 键退出循环
                 if cv2.waitKey(1) == ord('q'):
                     break
-                elif stop:
-                    break
 
-            # 关闭摄像头和窗口
             cap.release()
             cv2.destroyAllWindows()
 
-            if label == 'unknown':
+            if face_images:  # Add this line
+                id_ = random.randint(1000, 9999)
+                for i, face_image in enumerate(face_images):
+                    filename = f'{face_folder}/face_{id_}_{i}.jpg'
+                    cv2.imwrite(filename, face_image)
+                    face_ids.append(id_)
+
+                lbph_face.train(face_images, np.array(face_ids))
+                feature_filename = f'{feature_folder}/face_{id_}.yml'
+                lbph_face.write(feature_filename)
+
+                face = Face_user(username=input_data, image=filename, feature=feature_filename)
+                face.save()
+
                 return render(request, 'page/register.html', {'my_data': 'Register successfully!'})
             else:
-                return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
+                return render(request, 'page/register.html', {'my_data': 'No new faces detected for registration!'})
+
+        else:
+            return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
 
