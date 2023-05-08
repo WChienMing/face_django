@@ -15,6 +15,7 @@ import cv2, os, time, face_recognition, dlib, sys, random
 import numpy as np
 # from django.core.files.base import ContentFile
 from myapp.models import Face_user
+from scipy.spatial import distance
 # import io
 # from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -44,10 +45,22 @@ def doregister(request):
 
 
 # need install opencv and Pillow and dlib and cmake
-def detect_face_register(request):
-    face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
-    lbph_face = cv2.face.LBPHFaceRecognizer_create()
+def euclidean_distance(vec1, vec2):
+    return np.linalg.norm(np.array(vec1) - np.array(vec2))
 
+def load_face_features(feature_folder):
+    face_features = []
+    face_feature_files = [f for f in os.listdir(feature_folder) if f.endswith('.csv')]
+    for feature_file in face_feature_files:
+        feature_path = os.path.join(feature_folder, feature_file)
+        features = np.loadtxt(feature_path, delimiter=',')
+        face_features.append(features)
+    return face_features
+
+def detect_face_register(request):
+    detector = dlib.get_frontal_face_detector()
+    predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
+    face_recognition_model = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
     face_folder = 'face_image'
     feature_folder = 'face_features'
 
@@ -61,39 +74,42 @@ def detect_face_register(request):
         if input_data != "":
             cap = cv2.VideoCapture(0)
 
-            feature_files = os.listdir(feature_folder)
-            if feature_files:
-                recognizer = cv2.face.LBPHFaceRecognizer_create()
-                for feature_file in feature_files:
-                    feature_path = os.path.join(feature_folder, feature_file)
-                    recognizer.read(feature_path)
+            registered_face_features = load_face_features(feature_folder)
 
-            face_count = 0
-            face_images = []
-            face_ids = []
-
-            while face_count < 100:
+            while True:
                 ret, frame = cap.read()
                 if not ret:
                     continue
 
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(100, 100))
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                faces = detector(rgb_frame)
 
-                for (x, y, w, h) in faces:
+                for face in faces:
+                    x, y, w, h = face.left(), face.top(), face.width(), face.height()
                     cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
-                    face_roi = gray[y:y+h, x:x+w]
+                    shape = predictor(rgb_frame, face)
+                    face_encoding = face_recognition_model.compute_face_descriptor(rgb_frame, shape)
 
-                    if feature_files:
-                        id_, confidence = recognizer.predict(face_roi)
-                        if confidence < 100:
-                            print(confidence)
-                            # return render(request, 'page/register.html', {'my_data': 'Known face detected, skipping'})
-                            continue
-                    face_images.append(face_roi)
-                    face_count += 1
-                    
+                    is_registered = False
+                    for registered_face_feature in registered_face_features:
+                        distance = euclidean_distance(face_encoding, registered_face_feature)
+                        if distance < 0.6:
+                            is_registered = True
+                            break
+
+                    if not is_registered:
+                        id_ = random.randint(1000, 9999)
+                        filename = f'{face_folder}/face_{id_}.jpg'
+                        cv2.imwrite(filename, frame[y:y+h, x:x+w])
+
+                        np_face_encoding = np.array(face_encoding)
+                        np.savetxt(f'{feature_folder}/face_{id_}.csv', np_face_encoding, delimiter=',')
+
+                        face = Face_user(username=input_data, image=filename, feature=f'{feature_folder}/face_{id_}.csv')
+                        face.save()
+
+                        registered_face_features.append(face_encoding)
 
                 cv2.imshow('Face detection', frame)
 
@@ -103,23 +119,7 @@ def detect_face_register(request):
             cap.release()
             cv2.destroyAllWindows()
 
-            if face_images:  # Add this line
-                id_ = random.randint(1000, 9999)
-                for i, face_image in enumerate(face_images):
-                    filename = f'{face_folder}/face_{id_}_{i}.jpg'
-                    cv2.imwrite(filename, face_image)
-                    face_ids.append(id_)
-
-                lbph_face.train(face_images, np.array(face_ids))
-                feature_filename = f'{feature_folder}/face_{id_}.yml'
-                lbph_face.write(feature_filename)
-
-                face = Face_user(username=input_data, image=filename, feature=feature_filename)
-                face.save()
-
-                return render(request, 'page/register.html', {'my_data': 'Register successfully!'})
-            else:
-                return render(request, 'page/register.html', {'my_data': 'No new faces detected for registration!'})
+            return render(request, 'page/register.html', {'my_data': 'Register successfully!'})
 
         else:
             return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
