@@ -53,7 +53,7 @@ def load_face_features(feature_folder):
     face_feature_files = [f for f in os.listdir(feature_folder) if f.endswith('.csv')]
     for feature_file in face_feature_files:
         feature_path = os.path.join(feature_folder, feature_file)
-        features = np.loadtxt(feature_path, delimiter=',')
+        features = np.loadtxt(feature_path)
         face_features.append(features)
     return face_features
 
@@ -75,8 +75,13 @@ def detect_face_register(request):
             cap = cv2.VideoCapture(0)
 
             registered_face_features = load_face_features(feature_folder)
+            successfully_registered = False
 
-            while True:
+            face_capture_threshold = 5
+            face_count = 0
+            face_encodings = []
+
+            while not successfully_registered:
                 ret, frame = cap.read()
                 if not ret:
                     continue
@@ -92,24 +97,39 @@ def detect_face_register(request):
                     face_encoding = face_recognition_model.compute_face_descriptor(rgb_frame, shape)
 
                     is_registered = False
-                    for registered_face_feature in registered_face_features:
+                    registered_face_index = -1
+                    for index, registered_face_feature in enumerate(registered_face_features):
                         distance = euclidean_distance(face_encoding, registered_face_feature)
-                        if distance < 0.6:
+                        if distance < 0.4:
                             is_registered = True
+                            registered_face_index = index
                             break
+                        
+                        # print(registered_face_features)
+                    if is_registered:
+                        registered_face_filename = os.listdir(feature_folder)[registered_face_index]
+                        return render(request, 'page/register.html', {'my_data': f'Face is already registered! Feature file: {registered_face_filename}'})
+                    else:
+                        face_count += 1
+                        face_encodings.append(face_encoding)
 
-                    if not is_registered:
-                        id_ = random.randint(1000, 9999)
-                        filename = f'{face_folder}/face_{id_}.jpg'
-                        cv2.imwrite(filename, frame[y:y+h, x:x+w])
+                        if face_count >= face_capture_threshold:
+                            avg_face_encoding = np.mean(face_encodings, axis=0)
 
-                        np_face_encoding = np.array(face_encoding)
-                        np.savetxt(f'{feature_folder}/face_{id_}.csv', np_face_encoding, delimiter=',')
+                            id_ = random.randint(1000, 9999)
+                            filename = f'{face_folder}/face_{id_}.jpg'
+                            cv2.imwrite(filename, frame[y:y+h, x:x+w])
 
-                        face = Face_user(username=input_data, image=filename, feature=f'{feature_folder}/face_{id_}.csv')
-                        face.save()
+                            np_face_encoding = np.array(avg_face_encoding)
+                            np.savetxt(f'{feature_folder}/face_{id_}.csv', np_face_encoding, delimiter=',')
 
-                        registered_face_features.append(face_encoding)
+                            face = Face_user(username=input_data, image=filename, feature=f'{feature_folder}/face_{id_}.csv')
+                            face.save()
+
+                            registered_face_features.append(avg_face_encoding)
+
+                            successfully_registered = True
+                            break
 
                 cv2.imshow('Face detection', frame)
 
@@ -119,8 +139,12 @@ def detect_face_register(request):
             cap.release()
             cv2.destroyAllWindows()
 
-            return render(request, 'page/register.html', {'my_data': 'Register successfully!'})
+            if successfully_registered:
+                return render(request, 'page/register.html', {'my_data': 'Registered face successfully!'})
+            else:
+                return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
 
         else:
             return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
+
 
