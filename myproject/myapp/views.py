@@ -16,6 +16,7 @@ import numpy as np
 # from django.core.files.base import ContentFile
 from myapp.models import Face_user
 from scipy.spatial import distance
+import torch
 # import io
 # from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -43,6 +44,16 @@ def doregister(request):
         return HttpResponse('Invalid request method.')
     
 
+def testgpu(request):
+    # 检查是否有可用的GPU
+    if torch.cuda.is_available():
+        print("GPU is available.")
+        device = torch.device('cuda:0')
+    else:
+        print("GPU is not available. Using CPU instead.")
+        device = torch.device('cpu')
+    
+    return HttpResponse("This is a response from the testgpu view.")
 
 # need install opencv and Pillow and dlib and cmake
 def euclidean_distance(vec1, vec2):
