@@ -70,6 +70,7 @@ def load_face_features(feature_folder):
 
 def detect_face_register(request):
     detector = dlib.get_frontal_face_detector()
+    # cnn_face_detector = dlib.cnn_face_detection_model_v1('mmod_human_face_detector.dat')
     predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
     face_recognition_model = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
     face_folder = 'face_image'
@@ -88,19 +89,28 @@ def detect_face_register(request):
             registered_face_features = load_face_features(feature_folder)
             successfully_registered = False
 
-            face_capture_threshold = 5
+            face_capture_threshold = 10
             face_count = 0
             face_encodings = []
+            frame_count = 0  # Add frame counter
 
             while not successfully_registered:
                 ret, frame = cap.read()
+                frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
                 if not ret:
+                    continue
+
+                frame_count += 1  # Increase frame counter
+                if frame_count % 5 != 0:  # Skip frames
                     continue
 
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 faces = detector(rgb_frame)
+                # faces = cnn_face_detector(rgb_frame)
 
                 for face in faces:
+                    # cnn_face_detector returns mmod_rectangles
+                    # face = face.rect
                     x, y, w, h = face.left(), face.top(), face.width(), face.height()
                     cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
