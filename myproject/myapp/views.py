@@ -16,13 +16,43 @@ import numpy as np
 # from django.core.files.base import ContentFile
 from myapp.models import Face_user
 from scipy.spatial import distance
+from threading import Thread
+from queue import Queue
 # import torch
 # import io
 # from django.core.files.uploadedfile import SimpleUploadedFile
 
+class VideoCaptureThreading:
+    def __init__(self, src=0):
+        self.src = src
+        self.cap = cv2.VideoCapture(self.src)
+        self.q = Queue()
+        self.ret = False
+        self.frame = None
+
+    def start(self):
+        Thread(target=self._reader).start()
+
+    def _reader(self):
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                break
+            if not self.q.empty():
+                try:
+                    self.q.get_nowait()
+                except Exception as e:
+                    pass
+            self.q.put((ret, frame))
+
+    def read(self):
+        return self.q.get()
+
+    def stop(self):
+        self.cap.release()
 
 
-
+        
 def login(request):
     return render(request, 'page/login.html')
 
@@ -42,18 +72,7 @@ def doregister(request):
             return render(request, 'page/register.html', {'my_data': 'No Data'})
     else:
         return HttpResponse('Invalid request method.')
-    
 
-# def testgpu(request):
-#     # 检查是否有可用的GPU
-#     if torch.cuda.is_available():
-#         print("GPU is available.")
-#         device = torch.device('cuda:0')
-#     else:
-#         print("GPU is not available. Using CPU instead.")
-#         device = torch.device('cpu')
-    
-#     return HttpResponse("This is a response from the testgpu view.")
 
 # need install opencv and Pillow and dlib and cmake
 def euclidean_distance(vec1, vec2):
@@ -69,8 +88,7 @@ def load_face_features(feature_folder):
     return face_features
 
 def detect_face_register(request):
-    detector = dlib.get_frontal_face_detector()
-    # cnn_face_detector = dlib.cnn_face_detection_model_v1('mmod_human_face_detector.dat')
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
     predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
     face_recognition_model = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
     face_folder = 'face_image'
@@ -84,88 +102,82 @@ def detect_face_register(request):
     if request.method == 'POST':
         input_data = request.POST.get('username')
         if input_data != "":
-            cap = cv2.VideoCapture(0)
+            video_capture = VideoCaptureThreading(src=0)
+            video_capture.start()
 
             registered_face_features = load_face_features(feature_folder)
             successfully_registered = False
 
-            face_capture_threshold = 10
+            face_capture_threshold = 100
             face_count = 0
             face_encodings = []
-            frame_count = 0  # Add frame counter
 
-            while not successfully_registered:
-                ret, frame = cap.read()
-                frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-                if not ret:
-                    continue
+            try:
+                while not successfully_registered:
+                    ret, frame = video_capture.read()
+                    if not ret:
+                        continue
 
-                frame_count += 1  # Increase frame counter
-                if frame_count % 5 != 0:  # Skip frames
-                    continue
+                    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    faces = face_cascade.detectMultiScale(gray_frame, 1.3, 5)
 
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                faces = detector(rgb_frame)
-                # faces = cnn_face_detector(rgb_frame)
-
-                for face in faces:
-                    # cnn_face_detector returns mmod_rectangles
-                    # face = face.rect
-                    x, y, w, h = face.left(), face.top(), face.width(), face.height()
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-
-                    shape = predictor(rgb_frame, face)
-                    face_encoding = face_recognition_model.compute_face_descriptor(rgb_frame, shape)
-
-                    is_registered = False
-                    registered_face_index = -1
-                    for index, registered_face_feature in enumerate(registered_face_features):
-                        distance = euclidean_distance(face_encoding, registered_face_feature)
-                        if distance < 0.4:
-                            is_registered = True
-                            registered_face_index = index
-                            break
+                    for (x, y, w, h) in faces:
+                        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
                         
-                        # print(registered_face_features)
-                    if is_registered:
-                        registered_face_filename = os.listdir(feature_folder)[registered_face_index]
-                        return render(request, 'page/register.html', {'my_data': f'Face is already registered! Feature file: {registered_face_filename}'})
-                    else:
-                        face_count += 1
-                        face_encodings.append(face_encoding)
+                        face_rect = dlib.rectangle(x, y, x+w, y+h)
+                        shape = predictor(gray_frame, face_rect)
+                        face_encoding = face_recognition_model.compute_face_descriptor(frame, shape)
 
-                        if face_count >= face_capture_threshold:
-                            avg_face_encoding = np.mean(face_encodings, axis=0)
+                        is_registered = False
+                        registered_face_index = -1
+                        for index, registered_face_feature in enumerate(registered_face_features):
+                            distance = euclidean_distance(face_encoding, registered_face_feature)
+                            if distance < 0.4:
+                                is_registered = True
+                                registered_face_index = index
+                                break
 
-                            id_ = random.randint(1000, 9999)
-                            filename = f'{face_folder}/face_{id_}.jpg'
-                            cv2.imwrite(filename, frame[y:y+h, x:x+w])
+                        if is_registered:
+                            registered_face_filename = os.listdir(feature_folder)[registered_face_index]
+                            return render(request, 'page/register.html', {'my_data': f'Face is already registered! Feature file: {registered_face_filename}'})
+                        else:
+                            face_count += 1
+                            face_encodings.append(face_encoding)
 
-                            np_face_encoding = np.array(avg_face_encoding)
-                            np.savetxt(f'{feature_folder}/face_{id_}.csv', np_face_encoding, delimiter=',')
+                            if face_count >= face_capture_threshold:
+                                avg_face_encoding = np.mean(face_encodings, axis=0)
 
-                            face = Face_user(username=input_data, image=filename, feature=f'{feature_folder}/face_{id_}.csv')
-                            face.save()
+                                id_ = random.randint(1000, 9999)
+                                filename = f'{face_folder}/face_{id_}.jpg'
+                                cv2.imwrite(filename, frame[y:y+h, x:x+w])
 
-                            registered_face_features.append(avg_face_encoding)
+                                np_face_encoding = np.array(avg_face_encoding)
+                                np.savetxt(f'{feature_folder}/face_{id_}.csv', np_face_encoding, delimiter=',')
 
-                            successfully_registered = True
-                            break
+                                face = Face_user(username=input_data, image=filename, feature=f'{feature_folder}/face_{id_}.csv')
+                                face.save()
 
-                cv2.imshow('Face detection', frame)
+                                registered_face_features.append(avg_face_encoding)
 
-                if cv2.waitKey(1) == ord('q'):
-                    break
+                                successfully_registered = True
+                                break
 
-            cap.release()
-            cv2.destroyAllWindows()
+                    cv2.imshow('Face detection', frame)
+
+                    if cv2.waitKey(1) == ord('q'):
+                        break
+            except Exception as e:
+                print(f"An error occurred: {e}")
+            finally:
+                video_capture.stop()
+                cv2.destroyAllWindows()
 
             if successfully_registered:
                 return render(request, 'page/register.html', {'my_data': 'Registered face successfully!'})
             else:
                 return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
-
         else:
             return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
-
+    else:
+        return render(request, 'page/register.html', {'my_data': 'Invalid request method'})
 
