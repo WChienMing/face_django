@@ -88,7 +88,8 @@ def load_face_features(feature_folder):
     return face_features
 
 def detect_face_register(request):
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    # detector = dlib.get_frontal_face_detector()
+    cnn_face_detector = dlib.cnn_face_detection_model_v1('mmod_human_face_detector.dat')
     predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
     face_recognition_model = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
     face_folder = 'face_image'
@@ -104,6 +105,7 @@ def detect_face_register(request):
         if input_data != "":
             video_capture = VideoCaptureThreading(src=0)
             video_capture.start()
+            # cap = cv2.VideoCapture(0)
 
             registered_face_features = load_face_features(feature_folder)
             successfully_registered = False
@@ -111,22 +113,32 @@ def detect_face_register(request):
             face_capture_threshold = 100
             face_count = 0
             face_encodings = []
+            frame_count = 0  # Add frame counter
 
             try:
                 while not successfully_registered:
+                    # ret, frame = cap.read()
                     ret, frame = video_capture.read()
+                    frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
                     if not ret:
                         continue
 
-                    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    faces = face_cascade.detectMultiScale(gray_frame, 1.3, 5)
+                    frame_count += 1  # Increase frame counter
+                    if frame_count % 5 != 0:  # Skip frames
+                        continue
 
-                    for (x, y, w, h) in faces:
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    # faces = detector(rgb_frame)
+                    faces = cnn_face_detector(rgb_frame)
+
+                    for face in faces:
+                        # cnn_face_detector returns mmod_rectangles
+                        face = face.rect
+                        x, y, w, h = face.left(), face.top(), face.width(), face.height()
                         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                        
-                        face_rect = dlib.rectangle(x, y, x+w, y+h)
-                        shape = predictor(gray_frame, face_rect)
-                        face_encoding = face_recognition_model.compute_face_descriptor(frame, shape)
+
+                        shape = predictor(rgb_frame, face)
+                        face_encoding = face_recognition_model.compute_face_descriptor(rgb_frame, shape)
 
                         is_registered = False
                         registered_face_index = -1
@@ -136,7 +148,8 @@ def detect_face_register(request):
                                 is_registered = True
                                 registered_face_index = index
                                 break
-
+                            
+                            # print(registered_face_features)
                         if is_registered:
                             registered_face_filename = os.listdir(feature_folder)[registered_face_index]
                             return render(request, 'page/register.html', {'my_data': f'Face is already registered! Feature file: {registered_face_filename}'})
@@ -166,6 +179,7 @@ def detect_face_register(request):
 
                     if cv2.waitKey(1) == ord('q'):
                         break
+                    
             except Exception as e:
                 print(f"An error occurred: {e}")
             finally:
@@ -180,4 +194,5 @@ def detect_face_register(request):
             return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
     else:
         return render(request, 'page/register.html', {'my_data': 'Invalid request method'})
+
 
