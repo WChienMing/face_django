@@ -22,6 +22,7 @@ from queue import Queue
 # import io
 # from django.core.files.uploadedfile import SimpleUploadedFile
 
+# 定义一个多线程版本的视频捕获类
 class VideoCaptureThreading:
     def __init__(self, src=0):
         self.src = src
@@ -30,9 +31,11 @@ class VideoCaptureThreading:
         self.ret = False
         self.frame = None
 
+    # 开始捕获视频
     def start(self):
         Thread(target=self._reader).start()
 
+    # 读取视频帧
     def _reader(self):
         while True:
             ret, frame = self.cap.read()
@@ -40,29 +43,28 @@ class VideoCaptureThreading:
                 break
             if not self.q.empty():
                 try:
-                    self.q.get_nowait()
+                    self.q.get_nowait()   # 清空队列
                 except Exception as e:
                     pass
-            self.q.put((ret, frame))
+            self.q.put((ret, frame))    # 将捕获的帧放入队列
 
+    # 从队列中获取视频帧
     def read(self):
         return self.q.get()
 
+    # 停止视频捕获
     def stop(self):
         self.cap.release()
 
-
-        
+# 登录视图
 def login(request):
     return render(request, 'page/login.html')
 
+# 注册视图
 def register(request):
     return render(request, 'page/register.html')
 
-
-
-# 在后端视图函数中使用@csrf_exempt装饰器。
-# @csrf_exempt
+# 注册处理视图
 def doregister(request):
     if request.method == 'POST':
         input_data = request.POST.get('username')
@@ -73,11 +75,11 @@ def doregister(request):
     else:
         return HttpResponse('Invalid request method.')
 
-
-# need install opencv and Pillow and dlib and cmake
+# 计算欧氏距离
 def euclidean_distance(vec1, vec2):
     return np.linalg.norm(np.array(vec1) - np.array(vec2))
 
+# 加载人脸特征
 def load_face_features(feature_folder):
     face_features = []
     face_feature_files = [f for f in os.listdir(feature_folder) if f.endswith('.csv')]
@@ -87,8 +89,8 @@ def load_face_features(feature_folder):
         face_features.append(features)
     return face_features
 
+# 人脸识别注册视图
 def detect_face_register(request):
-    # detector = dlib.get_frontal_face_detector()
     cnn_face_detector = dlib.cnn_face_detection_model_v1('mmod_human_face_detector.dat')
     predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
     face_recognition_model = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
@@ -103,40 +105,46 @@ def detect_face_register(request):
     if request.method == 'POST':
         input_data = request.POST.get('username')
         if input_data != "":
+            # 启动视频捕获
             video_capture = VideoCaptureThreading(src=0)
             video_capture.start()
-            # cap = cv2.VideoCapture(0)
 
+            # 加载已注册的人脸特征
             registered_face_features = load_face_features(feature_folder)
             successfully_registered = False
 
-            face_capture_threshold = 100
-            face_count = 0
-            face_encodings = []
-            frame_count = 0  # Add frame counter
+            face_capture_threshold = 100  # 设置捕获人脸的阈值
+            face_count = 0  # 初始化人脸计数器
+            face_encodings = []  # 存储人脸编码
+            frame_count = 0  # 增加帧计数器
 
             try:
                 while not successfully_registered:
-                    # ret, frame = cap.read()
+                    # 读取视频帧
                     ret, frame = video_capture.read()
-                    frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+                    frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)  # 调整帧大小
                     if not ret:
                         continue
 
-                    frame_count += 1  # Increase frame counter
-                    if frame_count % 5 != 0:  # Skip frames
+                    frame_count += 1  # 增加帧计数
+                    if frame_count % 5 != 0:  # 跳帧处理
                         continue
 
+                    # 将帧转换为 RGB 格式
                     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    # faces = detector(rgb_frame)
+
+                    # 检测人脸
                     faces = cnn_face_detector(rgb_frame)
 
                     for face in faces:
-                        # cnn_face_detector returns mmod_rectangles
+                        # cnn_face_detector 返回 mmod_rectangles
                         face = face.rect
                         x, y, w, h = face.left(), face.top(), face.width(), face.height()
+
+                        # 画出人脸矩形框
                         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
+                        # 预测人脸关键点并编码
                         shape = predictor(rgb_frame, face)
                         face_encoding = face_recognition_model.compute_face_descriptor(rgb_frame, shape)
 
@@ -148,16 +156,18 @@ def detect_face_register(request):
                                 is_registered = True
                                 registered_face_index = index
                                 break
-                            
-                            # print(registered_face_features)
+
                         if is_registered:
+                            # 如果人脸已注册，则返回错误信息
                             registered_face_filename = os.listdir(feature_folder)[registered_face_index]
                             return render(request, 'page/register.html', {'my_data': f'Face is already registered! Feature file: {registered_face_filename}'})
                         else:
+                            # 如果人脸未注册，则进行注册
                             face_count += 1
                             face_encodings.append(face_encoding)
 
                             if face_count >= face_capture_threshold:
+                                # 当捕获到足够的人脸时，计算平均人脸编码并保存
                                 avg_face_encoding = np.mean(face_encodings, axis=0)
 
                                 id_ = random.randint(1000, 9999)
@@ -167,25 +177,32 @@ def detect_face_register(request):
                                 np_face_encoding = np.array(avg_face_encoding)
                                 np.savetxt(f'{feature_folder}/face_{id_}.csv', np_face_encoding, delimiter=',')
 
+                                # 将人脸信息保存到数据库
                                 face = Face_user(username=input_data, image=filename, feature=f'{feature_folder}/face_{id_}.csv')
                                 face.save()
 
+                                # 将新注册的人脸特征添加到已注册人脸特征列表
                                 registered_face_features.append(avg_face_encoding)
 
+                                # 设置成功注册标志
                                 successfully_registered = True
                                 break
 
+                    # 显示人脸检测结果
                     cv2.imshow('Face detection', frame)
 
+                    # 如果按下'q'键，退出循环
                     if cv2.waitKey(1) == ord('q'):
                         break
-                    
+
             except Exception as e:
                 print(f"An error occurred: {e}")
             finally:
+                # 停止视频捕获并销毁所有窗口
                 video_capture.stop()
                 cv2.destroyAllWindows()
 
+            # 根据是否成功注册，返回不同的消息
             if successfully_registered:
                 return render(request, 'page/register.html', {'my_data': 'Registered face successfully!'})
             else:
