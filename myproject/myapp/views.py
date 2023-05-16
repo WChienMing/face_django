@@ -11,13 +11,14 @@ from django.http import HttpResponse
 # from django.views.decorators.csrf import csrf_exempt
 
 # --face detect_face import
-import cv2, os, time, face_recognition, dlib, sys, random
+import cv2, os, time, face_recognition, dlib, sys, random, re
 import numpy as np
 # from django.core.files.base import ContentFile
 from myapp.models import Face_user
 from scipy.spatial import distance
 from threading import Thread
 from queue import Queue
+from mtcnn import MTCNN
 # import torch
 # import io
 # from django.core.files.uploadedfile import SimpleUploadedFile
@@ -91,7 +92,8 @@ def load_face_features(feature_folder):
 
 # 人脸识别注册视图
 def detect_face_register(request):
-    cnn_face_detector = dlib.cnn_face_detection_model_v1('mmod_human_face_detector.dat')
+    # cnn_face_detector = dlib.cnn_face_detection_model_v1('mmod_human_face_detector.dat')
+    mtcnn_detector = MTCNN() 
     predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
     face_recognition_model = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
     face_folder = 'face_image'
@@ -113,7 +115,7 @@ def detect_face_register(request):
             registered_face_features = load_face_features(feature_folder)
             successfully_registered = False
 
-            face_capture_threshold = 100  # 设置捕获人脸的阈值
+            face_capture_threshold = 5  # 设置捕获人脸的阈值
             face_count = 0  # 初始化人脸计数器
             face_encodings = []  # 存储人脸编码
             frame_count = 0  # 增加帧计数器
@@ -134,18 +136,20 @@ def detect_face_register(request):
                     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
                     # 检测人脸
-                    faces = cnn_face_detector(rgb_frame)
+                    # faces = cnn_face_detector(rgb_frame)
+                    faces = mtcnn_detector.detect_faces(rgb_frame)
 
                     for face in faces:
                         # cnn_face_detector 返回 mmod_rectangles
-                        face = face.rect
-                        x, y, w, h = face.left(), face.top(), face.width(), face.height()
-
+                        # face = face.rect
+                        # x, y, w, h = face.left(), face.top(), face.width(), face.height()
+                        x, y, w, h = face['box']
                         # 画出人脸矩形框
                         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
                         # 预测人脸关键点并编码
-                        shape = predictor(rgb_frame, face)
+                        # shape = predictor(rgb_frame, face)
+                        shape = predictor(rgb_frame, dlib.rectangle(x, y, x + w, y + h))
                         face_encoding = face_recognition_model.compute_face_descriptor(rgb_frame, shape)
 
                         is_registered = False
@@ -160,6 +164,8 @@ def detect_face_register(request):
                         if is_registered:
                             # 如果人脸已注册，则返回错误信息
                             registered_face_filename = os.listdir(feature_folder)[registered_face_index]
+                            number = re.findall(r'\d+', registered_face_filename)
+                            print(number)
                             return render(request, 'page/register.html', {'my_data': f'Face is already registered! Feature file: {registered_face_filename}'})
                         else:
                             # 如果人脸未注册，则进行注册
@@ -178,7 +184,7 @@ def detect_face_register(request):
                                 np.savetxt(f'{feature_folder}/face_{id_}.csv', np_face_encoding, delimiter=',')
 
                                 # 将人脸信息保存到数据库
-                                face = Face_user(username=input_data, image=filename, feature=f'{feature_folder}/face_{id_}.csv')
+                                face = Face_user(username=input_data, image=filename, feature=f'{feature_folder}/face_{id_}.csv', face_id=id_)
                                 face.save()
 
                                 # 将新注册的人脸特征添加到已注册人脸特征列表

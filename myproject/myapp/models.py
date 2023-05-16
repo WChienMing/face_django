@@ -14,3 +14,4 @@ class Face_user(models.Model):
     username = models.CharField(max_length=100)
     image = models.CharField(max_length=100)
     feature = models.CharField(max_length=100)
+    face_id = models.UUIDField()
