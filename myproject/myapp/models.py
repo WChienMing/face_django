@@ -10,8 +10,13 @@ from django.db import models
 #     class Meta:
 #         db_table = 'test_user'
 
+# after add a new column here can run this in terminal
+# python manage.py makemigrations
+# python manage.py migrate
 class Face_user(models.Model):
     username = models.CharField(max_length=100)
     image = models.CharField(max_length=100)
     feature = models.CharField(max_length=100)
-    face_id = models.UUIDField()
+    face_id = models.CharField(max_length=100)
+    face_id123 = models.CharField(max_length=100)
+
