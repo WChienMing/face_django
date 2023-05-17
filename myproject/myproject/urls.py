@@ -24,5 +24,5 @@ urlpatterns = [
     path('register/', views.register, name='register'),
     path('doregister/', views.doregister, name='doregister'),
     path('detect_face_register/', views.detect_face_register, name='detect_face_register'),
-    # path('testgpu/', views.testgpu, name='testgpu'),
+    path('check_in_out/', views.check_in_out, name='check_in_out'),
 ]

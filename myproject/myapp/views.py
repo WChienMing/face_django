@@ -11,10 +11,10 @@ from django.http import HttpResponse
 # from django.views.decorators.csrf import csrf_exempt
 
 # --face detect_face import
-import cv2, os, time, face_recognition, dlib, sys, random, re
+import cv2, os, datetime, face_recognition, dlib, sys, random, re, pytz
 import numpy as np
 # from django.core.files.base import ContentFile
-from myapp.models import Face_user
+from myapp.models import Face_user, Face_record
 from scipy.spatial import distance
 from threading import Thread
 from queue import Queue
@@ -91,12 +91,13 @@ def load_face_features(feature_folder):
     return face_features
 
 # 人脸识别注册视图
+face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
+face_recognition_model = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
+
 def detect_face_register(request):
     # cnn_face_detector = dlib.cnn_face_detection_model_v1('mmod_human_face_detector.dat')
     # mtcnn_detector = MTCNN()
-    face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
-    predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
-    face_recognition_model = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
     face_folder = 'face_image'
     feature_folder = 'face_features'
 
@@ -232,5 +233,91 @@ def detect_face_register(request):
             return render(request, 'page/register.html', {'my_data': 'Register unsuccessfully!'})
     else:
         return render(request, 'page/register.html', {'my_data': 'Invalid request method'})
+
+
+def check_in_out(request):
+    feature_folder = 'face_features'
+    malaysia_tz = pytz.timezone('Asia/Kuala_Lumpur')
+    current_datetime = datetime.datetime.now(malaysia_tz)
+    formatted_datetime = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
+    if request.method == 'POST':
+
+        # 启动视频捕获
+        video_capture = VideoCaptureThreading(src=0)
+        video_capture.start()
+        # 加载已注册的人脸特征
+        registered_face_features = load_face_features(feature_folder)
+        successfully_registered = False
+
+        try:
+            while not successfully_registered:
+                # 读取视频帧
+                ret, frame = video_capture.read()
+                frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)  # 调整帧大小
+                if not ret:
+                    continue
+
+                # 将帧转换为 RGB 格式
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                # 检测人脸
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+
+                for (x, y, w, h) in faces:
+
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+
+                    # 预测人脸关键点并编码
+                    shape = predictor(rgb_frame, dlib.rectangle(x, y, x + w, y + h))
+                    face_encoding = face_recognition_model.compute_face_descriptor(rgb_frame, shape)
+
+                    is_registered = False
+                    registered_face_index = -1
+                    for index, registered_face_feature in enumerate(registered_face_features):
+                        distance = euclidean_distance(face_encoding, registered_face_feature)
+                        if distance < 0.4:
+                            is_registered = True
+                            registered_face_index = index
+                            break
+
+                    if is_registered:
+                        registered_face_filename = os.listdir(feature_folder)[registered_face_index]
+                        number = re.findall(r'\d+', registered_face_filename)
+                        numbers = int(number[0])
+                        face_user = Face_user.objects.get(face_id=numbers)
+                        if Face_record.objects.filter(face_id=numbers).exists():
+                            record = Face_record.objects.filter(face_id=numbers).latest('id')
+                            if record.out_type == 1:
+                                face = Face_record(face_id=numbers,in_type=1,in_date_time=formatted_datetime)
+                                face.save()
+                                return render(request, 'page/login.html', {'my_data': f'Check IN successfully! Username is: {face_user.username}'})
+                            else:
+                                record = Face_record.objects.filter(id=record.id).update(out_type=1,out_date_time=formatted_datetime)
+                                return render(request, 'page/login.html', {'my_data': f'Check OUT successfully! Username is: {face_user.username}'})
+                        else:
+                            face = Face_record(face_id=numbers,in_type=1,in_date_time=formatted_datetime)
+                            face.save()
+                            return render(request, 'page/login.html', {'my_data': f'Check IN successfully! Username is: {face_user.username}'})
+                    else:
+                        return render(request, 'page/login.html', {'my_data': f'Unknown users!!!'})
+
+                # 显示人脸检测结果
+                cv2.imshow('Face detection', frame)
+
+                # 如果按下'q'键，退出循环
+                if cv2.waitKey(1) == ord('q'):
+                    break
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+        finally:
+            # 停止视频捕获并销毁所有窗口
+            video_capture.stop()
+            cv2.destroyAllWindows()
+        return render(request, 'page/login.html', {'my_data': 'No face detected or face registration failed'})
+    else:
+        return render(request, 'page/login.html', {'my_data': 'Invalid request method'})
+
 
 

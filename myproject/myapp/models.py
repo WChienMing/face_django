@@ -1,4 +1,5 @@
 from django.db import models
+import uuid
 
 # use this class the class name must same with table name
 # class User(models.Model):
@@ -18,5 +19,14 @@ class Face_user(models.Model):
     image = models.CharField(max_length=100)
     feature = models.CharField(max_length=100)
     face_id = models.CharField(max_length=100)
-    face_id123 = models.CharField(max_length=100)
+
+
+class Face_record(models.Model):
+    id = models.IntegerField(primary_key=True)
+    face_id = models.IntegerField()
+    in_type = models.IntegerField()
+    in_date_time = models.DateTimeField()
+    out_type = models.IntegerField()
+    out_date_time = models.DateTimeField()
+    
 
