@@ -19,6 +19,7 @@ from scipy.spatial import distance
 from threading import Thread
 from queue import Queue
 from mtcnn import MTCNN
+from django.db import connection
 # import torch
 # import io
 # from django.core.files.uploadedfile import SimpleUploadedFile
@@ -60,6 +61,30 @@ class VideoCaptureThreading:
 # 登录视图
 def login(request):
     return render(request, 'page/login.html')
+
+
+def view_home(request):
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT `myapp_face_record`.`id`, `myapp_face_record`.`face_id`, `myapp_face_user`.`username`
+            ,`myapp_face_record`.`in_date_time`,`myapp_face_record`.`out_date_time`
+            FROM `myapp_face_record`
+            INNER JOIN `myapp_face_user`
+            ON `myapp_face_record`.`face_id` = `myapp_face_user`.`face_id`""")
+        result_list = []
+        for row in cursor.fetchall():
+            # 将查询结果构造为对象并添加到结果列表中
+            record = {
+                'id': row[0],
+                'face_id': row[1],
+                'username': row[2],
+                'in_date_time': row[3],
+                'out_date_time': row[4],
+            }
+            result_list.append(record)
+
+        print(row)
+    return render(request, 'page/home.html', {'data': result_list})
 
 # 注册视图
 def register(request):
@@ -248,7 +273,7 @@ def check_in_out(request):
         # 加载已注册的人脸特征
         registered_face_features = load_face_features(feature_folder)
         successfully_registered = False
-
+        
         try:
             while not successfully_registered:
                 # 读取视频帧
@@ -256,7 +281,7 @@ def check_in_out(request):
                 frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)  # 调整帧大小
                 if not ret:
                     continue
-
+                print("hello123")
                 # 将帧转换为 RGB 格式
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -315,6 +340,7 @@ def check_in_out(request):
             # 停止视频捕获并销毁所有窗口
             video_capture.stop()
             cv2.destroyAllWindows()
+        
         return render(request, 'page/login.html', {'my_data': 'No face detected or face registration failed'})
     else:
         return render(request, 'page/login.html', {'my_data': 'Invalid request method'})

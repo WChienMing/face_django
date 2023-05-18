@@ -25,4 +25,5 @@ urlpatterns = [
     path('doregister/', views.doregister, name='doregister'),
     path('detect_face_register/', views.detect_face_register, name='detect_face_register'),
     path('check_in_out/', views.check_in_out, name='check_in_out'),
+    path('home/', views.view_home, name='home'),
 ]
